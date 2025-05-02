@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 import re
 import time
 import os
+from collections import defaultdict
 
 def get_authors_from_letter(letter='a', language='english'):
     """
@@ -41,7 +42,7 @@ def get_authors_from_letter(letter='a', language='english'):
             print("Could not find author listings div")
             return []
 
-        authors = []
+        authors = defaultdict(lambda: {"name": "", "book_count": 0, "books": []})
         
         # Find all h2 elements (author headings)
         author_headings = author_div.find_all("h2")
@@ -66,6 +67,10 @@ def get_authors_from_letter(letter='a', language='english'):
                 author_name = heading.text.strip()
 
             if not author_name:
+                continue
+
+            # Skip "Anonymous", "Various", and "Unknown" authors
+            if any(exclude in author_name.lower() for exclude in ["anonymous", "various", "unknown"]):
                 continue
 
             # Find the ul that follows this heading
@@ -98,18 +103,34 @@ def get_authors_from_letter(letter='a', language='english'):
                         "url": f"https://www.gutenberg.org{book_url}" if book_url.startswith("/") else book_url
                     })
 
-            # Only add authors who meet the minimum books requirement
-            if book_count >= min_books:
-                authors.append({
-                    "name": author_name,
-                    "book_count": book_count
-                })
+            # Merge authors with similar names (e.g., Lytton, Edward Bulwer and Lytton, Edward Bulwer Lytton)
+            author_name_normalized = normalize_author_name(author_name)
+
+            authors[author_name_normalized]["name"] = author_name
+            authors[author_name_normalized]["book_count"] += book_count
+            authors[author_name_normalized]["books"].extend(books)
         
-        return authors
+        # Convert defaultdict to list
+        return list(authors.values())
 
     except Exception as e:
         print(f"Error scraping letter {letter}: {e}")
         return []
+
+def normalize_author_name(name):
+    """
+    Normalize author names to handle variations like full names, titles, etc.
+    
+    Args:
+        name (str): The original author name.
+        
+    Returns:
+        str: A normalized version of the author name.
+    """
+    # Remove "Baron", "Lord", and any extra parts from the name
+    name = re.sub(r"\s*(baron|lord|sir|count|duke|etc)\s*", "", name, flags=re.IGNORECASE)
+    # Normalize to lower case and strip extra spaces
+    return name.lower().strip()
 
 def get_prolific_authors(min_books=7, language='english', letters=None):
     """
@@ -146,23 +167,26 @@ def get_prolific_authors(min_books=7, language='english', letters=None):
 
     return prolific_authors
 
-def save_author_list(authors, filename="prolific_authors.txt"):
+def save_author_list(authors, language, min_books):
     """
-    Saves the list of authors to a text file.
+    Saves the list of authors to a text file with a dynamic filename based on language and min_books.
     
     Args:
         authors (list): List of author dictionaries.
-        filename (str): Name of the file to save to.
+        language (str): The language used for filtering.
+        min_books (int): The minimum number of books used for filtering.
         
     Returns:
         bool: True if successful, False otherwise.
     """
     try:
+        # Generate the filename based on language and minimum number of books
+        filename = f"{language}_{min_books}books.txt"
+        
         with open(filename, 'w', encoding='utf-8') as f:
             f.write(f"Found {len(authors)} prolific authors:\n\n")
             
             for i, author in enumerate(authors):
-                # Print only the author name, time period (if available), and book count
                 f.write(f"{i+1}. {author['name']} - {author['book_count']} books\n")
                 
         print(f"Author list saved to {filename}")
@@ -177,16 +201,14 @@ if __name__ == "__main__":
     language = input("Enter language (e.g., 'english'): ").lower()
     min_books = int(input("Enter minimum number of books per author: "))
 
-    # Get authors from specific letters
-    letters_to_scrape = ['a']  # For testing, we scrape only the letter 'a'
-    
+    # Get authors from all letters
     print("Starting to scrape prolific authors...")
-    prolific_authors = get_prolific_authors(min_books=min_books, language=language, letters=letters_to_scrape)
+    prolific_authors = get_prolific_authors(min_books=min_books, language=language)
     
     print(f"\nFound {len(prolific_authors)} prolific authors:")
     for i, author in enumerate(prolific_authors):
         # Print only the author name and book count
         print(f"{i+1}. {author['name']} - {author['book_count']} books")
 
-    # Save the author list to a file
-    save_author_list(prolific_authors)
+    # Save the author list to a file with dynamic filename
+    save_author_list(prolific_authors, language, min_books)
